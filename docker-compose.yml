@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  service-a:
+    build:
+      context: ./service_a
+    container_name: service-a
+    # We map your Windows/WSL host port 8001 to the container's port 8000
+    ports:
+      - "8001:8000"
+    environment:
+      - SERVICE_NAME=service-a
+      # Docker's internal DNS automatically resolves "service-b" to the correct IP
+      - DOWNSTREAM_URL=http://service-b:8000
+    networks:
+      - blast-net
+    # depends_on ensures service-b starts first
+    depends_on:
+      - service-b
+
+  service-b:
+    build:
+      context: ./service_b
+    container_name: service-b
+    # Host port 8002 maps to container's port 8000
+    ports:
+      - "8002:8000"
+    environment:
+      - SERVICE_NAME=service-b
+    networks:
+      - blast-net
+
+networks:
+  blast-net:
+    # A bridge network provides the isolated DNS resolution layer we need
+    driver: bridge
