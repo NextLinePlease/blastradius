@@ -1,7 +1,5 @@
 version: '3.8'
 
-# YAML Anchors: This is a DRY technique. It defines a template block.
-# We inject this template into every service so we don't repeat the build context 6 times.
 x-service-base: &service-base
   build:
     context: ./service
@@ -9,6 +7,43 @@ x-service-base: &service-base
     - blast-net
 
 services:
+  # --- NEW: The PostgreSQL Database ---
+  postgres:
+    image: postgres:15-alpine
+    container_name: blast-postgres
+    environment:
+      POSTGRES_USER: blastuser
+      POSTGRES_PASSWORD: blastpass
+      POSTGRES_DB: blastradius
+    ports:
+      - "5432:5432"
+    volumes:
+      # This ensures database data survives container restarts
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - blast-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U blastuser -d blastradius"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # --- NEW: The Registry Service ---
+  registry:
+    build:
+      context: ./registry
+    container_name: blast-registry
+    ports:
+      - "8080:8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://blastuser:blastpass@postgres:5432/blastradius
+    networks:
+      - blast-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # --- EXISTING: The Worker Fleet ---
   service-f:
     <<: *service-base
     container_name: service-f
@@ -44,7 +79,6 @@ services:
   service-a:
     <<: *service-base
     container_name: service-a
-    # We only expose the entrypoint (Gateway) to your host machine.
     ports:
       - "8000:8000"
     environment:
@@ -54,3 +88,7 @@ services:
 networks:
   blast-net:
     driver: bridge
+
+# Declare the persistent volume for Postgres
+volumes:
+  postgres_data:
