@@ -42,7 +42,6 @@ async def correlation_id_middleware(request: Request, call_next):
     return response
 
 async def fetch_downstream(url: str):
-    """Now relies on the global http_client instead of creating a new one."""
     corr_id = correlation_id_var.get()
     headers = {"x-correlation-id": corr_id}
     
@@ -52,6 +51,9 @@ async def fetch_downstream(url: str):
             resp = await http_client.get(f"{url}/api/data", headers=headers, timeout=4.0)
             resp.raise_for_status()
             return resp.json()
+        except httpx.PoolTimeout:
+            # We explicitly ran out of TCP connections in the pool. Do not retry this immediately.
+            return {"error": "Connection pool exhausted", "service": url, "status": "overloaded"}
         except Exception as e:
             if attempt == max_retries - 1:
                 return {"error": str(e), "service": url, "status": "degraded"}
