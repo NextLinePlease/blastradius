@@ -1,36 +1,56 @@
 version: '3.8'
 
+# YAML Anchors: This is a DRY technique. It defines a template block.
+# We inject this template into every service so we don't repeat the build context 6 times.
+x-service-base: &service-base
+  build:
+    context: ./service
+  networks:
+    - blast-net
+
 services:
-  service-a:
-    build:
-      context: ./service_a
-    container_name: service-a
-    # We map your Windows/WSL host port 8001 to the container's port 8000
-    ports:
-      - "8001:8000"
+  service-f:
+    <<: *service-base
+    container_name: service-f
     environment:
-      - SERVICE_NAME=service-a
-      # Docker's internal DNS automatically resolves "service-b" to the correct IP
-      - DOWNSTREAM_URL=http://service-b:8000
-    networks:
-      - blast-net
-    # depends_on ensures service-b starts first
-    depends_on:
-      - service-b
+      - SERVICE_NAME=service-f
+
+  service-e:
+    <<: *service-base
+    container_name: service-e
+    environment:
+      - SERVICE_NAME=service-e
+
+  service-d:
+    <<: *service-base
+    container_name: service-d
+    environment:
+      - SERVICE_NAME=service-d
+
+  service-c:
+    <<: *service-base
+    container_name: service-c
+    environment:
+      - SERVICE_NAME=service-c
+      - DOWNSTREAM_URLS=http://service-e:8000,http://service-f:8000
 
   service-b:
-    build:
-      context: ./service_b
+    <<: *service-base
     container_name: service-b
-    # Host port 8002 maps to container's port 8000
-    ports:
-      - "8002:8000"
     environment:
       - SERVICE_NAME=service-b
-    networks:
-      - blast-net
+      - DOWNSTREAM_URLS=http://service-d:8000
+
+  service-a:
+    <<: *service-base
+    container_name: service-a
+    # We only expose the entrypoint (Gateway) to your host machine.
+    ports:
+      - "8000:8000"
+    environment:
+      - SERVICE_NAME=service-a
+      - DOWNSTREAM_URLS=http://service-b:8000,http://service-c:8000
 
 networks:
   blast-net:
-    # A bridge network provides the isolated DNS resolution layer we need
     driver: bridge
