@@ -20,12 +20,10 @@ http_client: httpx.AsyncClient = None
 redis_client: redis.Redis = None
 
 async def push_metric_to_redis(corr_id: str, status: int, latency_ms: float):
-    """Fire-and-forget telemetry pusher."""
+    """Fire-and-forget telemetry pusher with memory capping."""
     if not redis_client:
         return
     try:
-        # XADD appends this dictionary to the 'telemetry:requests' stream.
-        # The '*' tells Redis to auto-generate a strict time-series ID (milliseconds-sequence).
         await redis_client.xadd(
             "telemetry:requests",
             {
@@ -34,11 +32,13 @@ async def push_metric_to_redis(corr_id: str, status: int, latency_ms: float):
                 "correlation_id": corr_id,
                 "status": str(status),
                 "latency_ms": f"{latency_ms:.2f}"
-            }
+            },
+            # NEW: Keep only the newest 100,000 events. 
+            # approximate=True (~ operator in raw Redis) makes the truncation vastly more CPU efficient.
+            maxlen=100000, 
+            approximate=True
         )
     except Exception as e:
-        # We explicitly swallow this exception. 
-        # Observability failure must NEVER crash the core business application.
         print(f"[{SERVICE_NAME}] Telemetry drop: Failed to reach Redis: {e}")
 
 @asynccontextmanager
