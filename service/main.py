@@ -1,8 +1,10 @@
 import os
 import uuid
 import asyncio
+import time
 import httpx
-from fastapi import FastAPI, Request
+import redis.asyncio as redis
+from fastapi import FastAPI, Request, Response
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 
@@ -10,48 +12,99 @@ SERVICE_NAME = os.getenv("SERVICE_NAME", "unknown-service")
 APP_VERSION = os.getenv("APP_VERSION", "1.0.0")
 DOWNSTREAM_URLS = os.getenv("DOWNSTREAM_URLS", "")
 REGISTRY_URL = os.getenv("REGISTRY_URL", "http://registry:8000/services/")
+# Default points to the Docker Compose internal DNS for Redis
+REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
 
 correlation_id_var: ContextVar[str] = ContextVar("correlation_id", default="")
 http_client: httpx.AsyncClient = None
+redis_client: redis.Redis = None
+
+async def push_metric_to_redis(corr_id: str, status: int, latency_ms: float):
+    """Fire-and-forget telemetry pusher."""
+    if not redis_client:
+        return
+    try:
+        # XADD appends this dictionary to the 'telemetry:requests' stream.
+        # The '*' tells Redis to auto-generate a strict time-series ID (milliseconds-sequence).
+        await redis_client.xadd(
+            "telemetry:requests",
+            {
+                "service": SERVICE_NAME,
+                "version": APP_VERSION,
+                "correlation_id": corr_id,
+                "status": str(status),
+                "latency_ms": f"{latency_ms:.2f}"
+            }
+        )
+    except Exception as e:
+        # We explicitly swallow this exception. 
+        # Observability failure must NEVER crash the core business application.
+        print(f"[{SERVICE_NAME}] Telemetry drop: Failed to reach Redis: {e}")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global http_client
+    global http_client, redis_client
+    
+    # 1. Initialize HTTP Pool
     limits = httpx.Limits(max_keepalive_connections=50, max_connections=100)
     http_client = httpx.AsyncClient(limits=limits)
     
+    # 2. Initialize Redis Connection Pool
+    # decode_responses=True ensures Redis returns standard Python strings, not raw bytes.
+    redis_client = redis.from_url(REDIS_URL, decode_responses=True)
+    
+    # 3. Dynamic Registration
     downstreams = [url.strip().replace("http://", "").split(":")[0] for url in DOWNSTREAM_URLS.split(",") if url.strip()]
     payload = {"name": SERVICE_NAME, "version": APP_VERSION, "dependencies": downstreams}
     
-    # Retry loop strictly for initial registration
     max_retries = 5
     for attempt in range(max_retries):
         try:
             resp = await http_client.post(REGISTRY_URL, json=payload, timeout=5.0)
             resp.raise_for_status()
             print(f"[{SERVICE_NAME}] Successfully registered with Central Registry.")
-            break # Success, exit loop
+            break
         except Exception as e:
             if attempt == max_retries - 1:
-                print(f"[{SERVICE_NAME}] CRITICAL FAILURE: Could not register after {max_retries} attempts. Continuing as ghost node.")
+                print(f"[{SERVICE_NAME}] CRITICAL FAILURE: Registration failed. Continuing as ghost node.")
             else:
                 wait_time = 2 ** attempt
-                print(f"[{SERVICE_NAME}] Registry unavailable, retrying in {wait_time}s...")
                 await asyncio.sleep(wait_time)
-        
+                
     yield
     
+    # Graceful shutdown of both connection pools
     await http_client.aclose()
+    await redis_client.aclose()
 
 app = FastAPI(title=SERVICE_NAME, lifespan=lifespan)
 
 @app.middleware("http")
-async def correlation_id_middleware(request: Request, call_next):
+async def telemetry_middleware(request: Request, call_next):
+    # time.perf_counter() is immune to system clock updates (NTP syncs), making it strictly 
+    # superior to time.time() for measuring microsecond latency differences.
+    start_time = time.perf_counter()
+    
     corr_id = request.headers.get("x-correlation-id", str(uuid.uuid4()))
     correlation_id_var.set(corr_id)
-    response = await call_next(request)
-    response.headers["X-Correlation-ID"] = corr_id
-    return response
+    
+    status_code = 500
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+        response.headers["X-Correlation-ID"] = corr_id
+        return response
+    except Exception as e:
+        # If the route crashes completely, we still want to record the 500 error in Redis.
+        raise e
+    finally:
+        latency_ms = (time.perf_counter() - start_time) * 1000
+        
+        # ASYNCHRONOUS DECOUPLING:
+        # We do NOT use `await push_metric...`. Awaiting would force the user's HTTP request 
+        # to wait for the Redis network trip before getting their JSON payload.
+        # create_task schedules the push on the event loop to run independently in the background.
+        asyncio.create_task(push_metric_to_redis(corr_id, status_code, latency_ms))
 
 async def fetch_downstream(url: str):
     corr_id = correlation_id_var.get()

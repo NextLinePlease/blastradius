@@ -7,6 +7,19 @@ x-service-base: &service-base
     - blast-net
 
 services:
+# --- NEW: The Telemetry Message Broker ---
+  redis:
+    image: redis:7-alpine
+    container_name: blast-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - blast-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
   # --- NEW: The PostgreSQL Database ---
   postgres:
     image: postgres:15-alpine
