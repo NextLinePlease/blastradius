@@ -13,4 +13,4 @@ __pycache__/
 node_modules/
 .next/
 *.sqlite
-data/local/
+data/local/build/
