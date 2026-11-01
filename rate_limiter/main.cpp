@@ -25,7 +25,7 @@ int main() {
         auto redis = Redis("tcp://redis:6379");
         std::string script = load_script("token_bucket.lua");
         std::string sha = redis.script_load(script);
-        
+
         std::cout << "[INIT] Rate Limiter Lua script loaded." << std::endl;
 
         Server svr;
@@ -43,21 +43,21 @@ int main() {
                 res.set_content("{\"error\": \"Missing 'service' parameter\"}", "application/json");
                 return;
             }
-            
+
             std::string service = req.get_param_value("service");
             std::string service_key = "rate_limit:" + service;
-            
+
             // Hardcoded thresholds for prototyping (100 capacity, 10 tokens/sec)
-            std::string capacity = "100";  
-            std::string rate = "10";       
-            std::string requested = "1";   
-            
+            std::string capacity = "100";
+            std::string rate = "10";
+            std::string requested = "1";
+
             auto now = duration_cast<seconds>(system_clock::now().time_since_epoch()).count();
             std::string now_str = std::to_string(now);
 
             try {
                 auto result = redis.evalsha<long long>(sha, {service_key}, {capacity, rate, now_str, requested});
-                
+
                 if (result == 1) {
                     res.status = 200; // OK - Let the traffic through
                     res.set_content("{\"allowed\": true}", "application/json");
@@ -65,7 +65,7 @@ int main() {
                     res.status = 429; // Too Many Requests - Trip the circuit breaker
                     res.set_content("{\"allowed\": false, \"reason\": \"Circuit Breaker Tripped\"}", "application/json");
                 }
-            } catch (const Error &e) {
+            } catch (const sw::redis::Error &e) {
                 // In production, you must catch the NOSCRIPT error here and reload the Lua script if Redis restarted.
                 res.status = 500;
                 res.set_content("{\"error\": \"Redis execution failed\"}", "application/json");

@@ -33,9 +33,9 @@ async def push_metric_to_redis(corr_id: str, status: int, latency_ms: float):
                 "status": str(status),
                 "latency_ms": f"{latency_ms:.2f}"
             },
-            # NEW: Keep only the newest 100,000 events. 
+            # NEW: Keep only the newest 100,000 events.
             # approximate=True (~ operator in raw Redis) makes the truncation vastly more CPU efficient.
-            maxlen=100000, 
+            maxlen=100000,
             approximate=True
         )
     except Exception as e:
@@ -44,19 +44,19 @@ async def push_metric_to_redis(corr_id: str, status: int, latency_ms: float):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global http_client, redis_client
-    
+
     # 1. Initialize HTTP Pool
     limits = httpx.Limits(max_keepalive_connections=50, max_connections=100)
     http_client = httpx.AsyncClient(limits=limits)
-    
+
     # 2. Initialize Redis Connection Pool
     # decode_responses=True ensures Redis returns standard Python strings, not raw bytes.
     redis_client = redis.from_url(REDIS_URL, decode_responses=True)
-    
+
     # 3. Dynamic Registration
     downstreams = [url.strip().replace("http://", "").split(":")[0] for url in DOWNSTREAM_URLS.split(",") if url.strip()]
     payload = {"name": SERVICE_NAME, "version": APP_VERSION, "dependencies": downstreams}
-    
+
     max_retries = 5
     for attempt in range(max_retries):
         try:
@@ -70,9 +70,9 @@ async def lifespan(app: FastAPI):
             else:
                 wait_time = 2 ** attempt
                 await asyncio.sleep(wait_time)
-                
+
     yield
-    
+
     # Graceful shutdown of both connection pools
     await http_client.aclose()
     await redis_client.aclose()
@@ -81,13 +81,13 @@ app = FastAPI(title=SERVICE_NAME, lifespan=lifespan)
 
 @app.middleware("http")
 async def telemetry_middleware(request: Request, call_next):
-    # time.perf_counter() is immune to system clock updates (NTP syncs), making it strictly 
+    # time.perf_counter() is immune to system clock updates (NTP syncs), making it strictly
     # superior to time.time() for measuring microsecond latency differences.
     start_time = time.perf_counter()
-    
+
     corr_id = request.headers.get("x-correlation-id", str(uuid.uuid4()))
     correlation_id_var.set(corr_id)
-    
+
     status_code = 500
     try:
         response = await call_next(request)
@@ -99,9 +99,9 @@ async def telemetry_middleware(request: Request, call_next):
         raise e
     finally:
         latency_ms = (time.perf_counter() - start_time) * 1000
-        
+
         # ASYNCHRONOUS DECOUPLING:
-        # We do NOT use `await push_metric...`. Awaiting would force the user's HTTP request 
+        # We do NOT use `await push_metric...`. Awaiting would force the user's HTTP request
         # to wait for the Redis network trip before getting their JSON payload.
         # create_task schedules the push on the event loop to run independently in the background.
         asyncio.create_task(push_metric_to_redis(corr_id, status_code, latency_ms))
@@ -109,7 +109,27 @@ async def telemetry_middleware(request: Request, call_next):
 async def fetch_downstream(url: str):
     corr_id = correlation_id_var.get()
     headers = {"x-correlation-id": corr_id}
-    
+    downstream_name = url.replace("http://", "").split(":")[0]
+
+    # 1. THE CIRCUIT BREAKER CHECK
+    # We ask the C++ Rate Limiter: "Am I allowed to call this downstream service right now?"
+    rate_limit_url = f"http://rate-limiter:8080/check?service={downstream_name}"
+    try:
+        # We enforce a strict 200ms timeout on the check.
+        # If the gatekeeper is slow, we default to ALLOWING traffic (fail-open) rather than bringing down the system.
+        check_resp = await http_client.get(rate_limit_url, timeout=0.2)
+        if check_resp.status_code == 429:
+            # Circuit Breaker TRIPPED. We abort the outbound call instantly.
+            return {
+                "error": "Circuit Breaker Open",
+                "service": downstream_name,
+                "status": "throttled_by_gateway"
+            }
+    except Exception as e:
+        print(f"[{SERVICE_NAME}] Rate Limiter unavailable, failing open for {downstream_name}: {e}")
+
+    # 2. THE ACTUAL OUTBOUND CALL
+    # If the check was 200 OK (or if the gatekeeper crashed and we failed-open), we proceed.
     max_retries = 3
     for attempt in range(max_retries):
         try:
@@ -131,7 +151,7 @@ async def health():
 async def handle_request():
     corr_id = correlation_id_var.get()
     downstreams = [url.strip() for url in DOWNSTREAM_URLS.split(",") if url.strip()]
-    
+
     results = {}
     if downstreams:
         tasks = [fetch_downstream(url) for url in downstreams]
