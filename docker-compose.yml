@@ -6,6 +6,16 @@ x-service-base: &service-base
     - blast-net
 
 services:
+# --- NEW: Machine Learning Feature Extraction Pipeline ---
+  ml-collector:
+    build:
+      context: ./ml_pipeline
+    container_name: blast-ml-collector
+    networks:
+      - blast-net
+    depends_on:
+      redis:
+        condition: service_healthy
   rate-limiter:
     build:
       context: ./rate_limiter
