@@ -69,3 +69,42 @@ The project uses a simulated microservice fleet with service dependencies.
 **Day 11 of 30 — Work in progress.**
 
 Core infrastructure and initial backend components are under development. The ML-based deployment-risk prediction and complete rollout automation are planned milestones.
+---
+
+## Implementation Progress (Day 1–11)
+
+### 1. Development Environment
+
+- Configured Ubuntu using WSL2.
+- Integrated VS Code with the WSL environment.
+- Configured Docker Desktop and Docker Compose.
+- Established Git and GitHub version-control workflow.
+- Created a multi-container development environment.
+
+### 2. Microservice Architecture
+
+- Built a reusable FastAPI microservice.
+- Configured six simulated services: A, B, C, D, E and F.
+- Used environment variables to configure service names and dependencies.
+- Implemented asynchronous service-to-service communication using HTTPX.
+- Used `asyncio.gather()` for parallel downstream requests.
+- Implemented correlation IDs for distributed request tracing.
+- Added service health-check endpoints.
+
+### 3. Service Registry
+
+- Developed a Registry API using FastAPI.
+- Implemented service registration.
+- Integrated PostgreSQL for storing service and dependency information.
+- Implemented a dependency graph endpoint.
+- Represented service dependencies as a directed graph.
+
+Current dependency structure:
+
+```text
+Service A -> Service B, Service C
+Service B -> Service D
+Service C -> Service E, Service F
+Service D -> None
+Service E -> None
+Service F -> None
