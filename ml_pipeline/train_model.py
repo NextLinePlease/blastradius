@@ -58,7 +58,7 @@ model = xgb.XGBRegressor(
     learning_rate=0.1
 )
 
-model.fit(X_train, y_train)
+model.fit(X_train,y_train)
 
 # 3. EVALUATE AND EXPORT
 predictions = model.predict(X_test)
