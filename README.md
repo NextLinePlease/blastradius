@@ -108,3 +108,172 @@ Service C -> Service E, Service F
 Service D -> None
 Service E -> None
 Service F -> None
+
+---
+
+## Installation and Setup
+
+### Prerequisites
+
+- Windows with WSL2 and Ubuntu, or a Linux environment
+- Docker Desktop
+- Docker Compose
+- Git
+- Python 3
+
+### Clone the Repository
+
+```bash
+git clone https://github.com/NextLinePlease/blastradius.git
+cd blastradius
+```
+
+### Start the Microservice Environment
+
+Build and start the containers:
+
+```bash
+docker compose up --build -d
+```
+
+Check running containers:
+
+```bash
+docker compose ps
+```
+
+View container logs:
+
+```bash
+docker compose logs -f
+```
+
+### Verify the Services
+
+Check a microservice health endpoint:
+
+```bash
+curl http://localhost:8000/health
+```
+
+Retrieve the service dependency graph:
+
+```bash
+curl http://localhost:8080/dag/
+```
+
+### Run the Load Generator
+
+Create and activate the Python virtual environment:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+Install the required dependencies:
+
+```bash
+pip install -r service/requirements.txt
+```
+
+Run the load generator:
+
+```bash
+python load_generator.py
+```
+
+*Run commands from the project root. The required services must be running before executing integration tests.*
+
+---
+
+## Project Structure
+
+```text
+blastradius/
+│
+├── ml_pipeline/
+│   ├── collector.py
+│   ├── requirements.txt
+│   └── train_model.py
+│
+├── rate_limiter/
+│   ├── main.cpp
+│   ├── token_bucket.lua
+│   ├── CMakeLists.txt
+│   └── Dockerfile
+│
+├── registry/
+│   ├── main.py
+│   ├── requirements.txt
+│   └── Dockerfile
+│
+├── service/
+│   ├── main.py
+│   ├── requirements.txt
+│   └── Dockerfile
+│
+├── docker-compose.yml
+├── load_generator.py
+└── README.md
+```
+
+---
+
+## Upcoming Development Roadmap
+
+The following capabilities are planned, not yet claimed as completed.
+
+### Phase 1 — ML Risk Prediction
+
+- Complete telemetry data collection.
+- Build the feature engineering pipeline.
+- Generate labels from injected faults and measured downstream impact.
+- Train and evaluate a deployment-risk prediction model.
+- Predict deployment failure probability.
+
+### Phase 2 — Blast Radius Analysis
+
+- Analyze the service dependency DAG.
+- Calculate downstream impact of service failures.
+- Identify critical services and dependency paths.
+- Estimate the potential blast radius of a deployment.
+
+### Phase 3 — Safe Deployment Strategy
+
+- Implement canary rollout recommendations.
+- Determine rollout size and progression.
+- Define monitoring thresholds.
+- Implement automatic halt and rollback decisions.
+
+### Phase 4 — Monitoring and Explainability
+
+- Complete rate-limiter HTTP integration.
+- Improve telemetry and service observability.
+- Analyze historical simulated incidents.
+- Add GenAI-based risk explanations and incident summaries.
+- Develop a deployment monitoring dashboard.
+
+---
+
+## Development Status
+
+| Component | Status |
+|---|---|
+| Docker and development environment | Implemented |
+| Six simulated microservices | Implemented |
+| Service registry | Implemented |
+| PostgreSQL integration | Implemented |
+| Dependency DAG endpoint | Implemented |
+| C++ Token Bucket prototype | Implemented and tested |
+| Redis telemetry | Implemented |
+| Python load generator | Implemented |
+| Initial ML pipeline structure | In progress |
+| ML risk prediction | Planned |
+| Blast radius prediction | Planned |
+| Automated rollout and rollback | Planned |
+| GenAI explanations | Planned |
+
+**Current milestone: Day 11 of 30.**
+
+BlastRadius is an evolving engineering project. Its implementation status will be updated as development progresses.
