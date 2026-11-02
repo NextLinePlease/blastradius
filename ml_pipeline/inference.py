@@ -65,7 +65,7 @@ def run_control_loop():
                 
                 print(f"[CONTROL] {service_name:<12} | Risk: {risk_score:5.2f} | Throttle set to: {new_rate} req/sec")
                 
-            time.sleep(1) # Run the reconciliation loop every 1 second
+            time.sleep(1)  # Run the reconciliation loop every 1 second
             
         except Exception as e:
             print(f"[ERROR] Inference loop failed: {e}")
