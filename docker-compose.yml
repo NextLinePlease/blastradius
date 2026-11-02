@@ -8,6 +8,18 @@ x-service-base: &service-base
 services:
 # --- NEW: Machine Learning Feature Extraction Pipeline ---
   ml-collector:
+  ml-inference:
+    build:
+      context: ./ml_pipeline
+    container_name: blast-ml-inference
+    command: ["python", "inference.py"]
+    networks:
+      - blast-net
+    depends_on:
+      redis:
+        condition: service_healthy
+      ml-collector:
+        condition: service_started
     build:
       context: ./ml_pipeline
     container_name: blast-ml-collector
