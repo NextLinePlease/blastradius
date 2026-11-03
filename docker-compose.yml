@@ -1,4 +1,3 @@
-
 x-service-base: &service-base
   build:
     context: ./service
@@ -6,30 +5,54 @@ x-service-base: &service-base
     - blast-net
 
 services:
-# --- NEW: Machine Learning Feature Extraction Pipeline ---
-   # --- Machine Learning Pipeline ---
+
+  # Machine Learning Feature Extraction Pipeline
   ml-collector:
     build:
       context: ./ml_pipeline
     container_name: blast-ml-collector
+    command: ["python", "collector.py"]
+    environment:
+      REDIS_URL: redis://redis:6379/0
     networks:
       - blast-net
     depends_on:
       redis:
         condition: service_healthy
 
+  # Machine Learning Model Training
+  ml-trainer:
+    build:
+      context: ./ml_pipeline
+    container_name: blast-ml-trainer
+    command: ["python", "train_model.py"]
+    volumes:
+      - ml_model:/app/models
+    networks:
+      - blast-net
+
+  # Machine Learning Inference Engine
   ml-inference:
     build:
       context: ./ml_pipeline
     container_name: blast-ml-inference
     command: ["python", "inference.py"]
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      MODEL_PATH: /app/models/xgboost_risk_model.json
+    volumes:
+      - ml_model:/app/models
     networks:
       - blast-net
     depends_on:
       redis:
         condition: service_healthy
+      ml-trainer:
+        condition: service_completed_successfully
       ml-collector:
         condition: service_started
+
+  # C++ Distributed Rate Limiter
   rate-limiter:
     build:
       context: ./rate_limiter
@@ -42,6 +65,7 @@ services:
       redis:
         condition: service_healthy
 
+  # Redis
   redis:
     image: redis:7-alpine
     container_name: blast-redis
@@ -55,6 +79,7 @@ services:
       timeout: 3s
       retries: 5
 
+  # PostgreSQL
   postgres:
     image: postgres:15-alpine
     container_name: blast-postgres
@@ -74,6 +99,7 @@ services:
       timeout: 5s
       retries: 5
 
+  # Service Registry
   registry:
     build:
       context: ./registry
@@ -81,44 +107,45 @@ services:
     ports:
       - "8080:8000"
     environment:
-      - DATABASE_URL=postgresql+asyncpg://blastuser:blastpass@postgres:5432/blastradius
+      DATABASE_URL: postgresql+asyncpg://blastuser:blastpass@postgres:5432/blastradius
     networks:
       - blast-net
     depends_on:
       postgres:
         condition: service_healthy
 
+  # Simulated Microservices
   service-f:
     <<: *service-base
     container_name: service-f
     environment:
-      - SERVICE_NAME=service-f
+      SERVICE_NAME: service-f
 
   service-e:
     <<: *service-base
     container_name: service-e
     environment:
-      - SERVICE_NAME=service-e
+      SERVICE_NAME: service-e
 
   service-d:
     <<: *service-base
     container_name: service-d
     environment:
-      - SERVICE_NAME=service-d
+      SERVICE_NAME: service-d
 
   service-c:
     <<: *service-base
     container_name: service-c
     environment:
-      - SERVICE_NAME=service-c
-      - DOWNSTREAM_URLS=http://service-e:8000,http://service-f:8000
+      SERVICE_NAME: service-c
+      DOWNSTREAM_URLS: http://service-e:8000,http://service-f:8000
 
   service-b:
     <<: *service-base
     container_name: service-b
     environment:
-      - SERVICE_NAME=service-b
-      - DOWNSTREAM_URLS=http://service-d:8000
+      SERVICE_NAME: service-b
+      DOWNSTREAM_URLS: http://service-d:8000
 
   service-a:
     <<: *service-base
@@ -126,8 +153,8 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - SERVICE_NAME=service-a
-      - DOWNSTREAM_URLS=http://service-b:8000,http://service-c:8000
+      SERVICE_NAME: service-a
+      DOWNSTREAM_URLS: http://service-b:8000,http://service-c:8000
 
 networks:
   blast-net:
@@ -135,3 +162,4 @@ networks:
 
 volumes:
   postgres_data:
+  ml_model:
